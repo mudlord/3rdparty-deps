@@ -482,8 +482,6 @@ inline void saudio_setup(const saudio_desc& desc) { return saudio_setup(&desc); 
 
 #if defined(SOKOL_DUMMY_BACKEND)
     // No threads needed for SOKOL_DUMMY_BACKEND
-#elif (defined(__APPLE__) || defined(__linux__) || defined(__unix__)) && !defined(__EMSCRIPTEN__)
-    #include <pthread.h>
 #elif defined(_WIN32)
     #ifndef WIN32_LEAN_AND_MEAN
     #define WIN32_LEAN_AND_MEAN
@@ -559,12 +557,6 @@ inline void saudio_setup(const saudio_desc& desc) { return saudio_setup(&desc); 
 #if defined(SOKOL_DUMMY_BACKEND)
 
 typedef struct { int dummy_mutex; } _saudio_mutex_t;
-
-#elif (defined(__APPLE__) || defined(__linux__) || defined(__unix__)) && !defined(__EMSCRIPTEN__)
-
-typedef struct {
-    pthread_mutex_t mutex;
-} _saudio_mutex_t;
 
 #elif defined(_WIN32)
 
@@ -967,7 +959,6 @@ _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
     }
     SOKOL_ASSERT(wasapi_buffer);
 
-    /* convert float samples to int16_t, refill float buffer if needed */
     const int num_samples = num_frames * _saudio.num_channels;
     float* dst = (float*) wasapi_buffer;
     uint32_t buffer_pos = _saudio.backend.thread.src_buffer_pos;

@@ -969,7 +969,7 @@ _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
 
     /* convert float samples to int16_t, refill float buffer if needed */
     const int num_samples = num_frames * _saudio.num_channels;
-    int16_t* dst = (int16_t*) wasapi_buffer;
+    float* dst = (float*) wasapi_buffer;
     uint32_t buffer_pos = _saudio.backend.thread.src_buffer_pos;
     const uint32_t buffer_float_size = _saudio.backend.thread.src_buffer_byte_size / sizeof(float);
     float* src = _saudio.backend.thread.src_buffer;
@@ -977,7 +977,7 @@ _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
         if (0 == buffer_pos) {
             _saudio_wasapi_fill_buffer();
         }
-        dst[i] = (int16_t) (src[buffer_pos] * 0x7FFF);
+        dst[i] = src[buffer_pos];
         buffer_pos += 1;
         if (buffer_pos == buffer_float_size) {
             buffer_pos = 0;
@@ -1126,8 +1126,8 @@ _SOKOL_PRIVATE bool _saudio_backend_init(void) {
     memset(&fmt, 0, sizeof(fmt));
     fmt.nChannels = (WORD) _saudio.num_channels;
     fmt.nSamplesPerSec = _saudio.sample_rate;
-    fmt.wFormatTag = WAVE_FORMAT_PCM;
-    fmt.wBitsPerSample = 16;
+    fmt.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+    fmt.wBitsPerSample = 32;
     fmt.nBlockAlign = (fmt.nChannels * fmt.wBitsPerSample) / 8;
     fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
     dur = (REFERENCE_TIME)
@@ -1155,11 +1155,9 @@ _SOKOL_PRIVATE bool _saudio_backend_init(void) {
         SOKOL_LOG("sokol_audio wasapi: audio client SetEventHandle failed");
         goto error;
     }
-    _saudio.backend.si16_bytes_per_frame = _saudio.num_channels * sizeof(int16_t);
     _saudio.bytes_per_frame = _saudio.num_channels * sizeof(float);
     _saudio.backend.thread.src_buffer_frames = _saudio.buffer_frames;
     _saudio.backend.thread.src_buffer_byte_size = _saudio.backend.thread.src_buffer_frames * _saudio.bytes_per_frame;
-
     /* allocate an intermediate buffer for sample format conversion */
     _saudio.backend.thread.src_buffer = (float*) SOKOL_MALLOC(_saudio.backend.thread.src_buffer_byte_size);
     SOKOL_ASSERT(_saudio.backend.thread.src_buffer);

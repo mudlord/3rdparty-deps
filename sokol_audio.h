@@ -313,10 +313,6 @@ _SOKOL_PRIVATE DWORD WINAPI _saudio_wasapi_thread_fn(LPVOID param) {
 }
 
 _SOKOL_PRIVATE void _saudio_wasapi_release(void) {
-    if (_saudio.backend.thread.src_buffer) {
-        SOKOL_FREE(_saudio.backend.thread.src_buffer);
-        _saudio.backend.thread.src_buffer = 0;
-    }
     if (_saudio.backend.render_client) {
         IAudioRenderClient_Release(_saudio.backend.render_client);
         _saudio.backend.render_client = 0;

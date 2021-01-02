@@ -13,342 +13,6 @@
     before you include this file in *one* C or C++ file to create the
     implementation.
 
-    Optionally provide the following defines with your own implementations:
-
-    SOKOL_DUMMY_BACKEND - use a dummy backend
-    SOKOL_ASSERT(c)     - your own assert macro (default: assert(c))
-    SOKOL_LOG(msg)      - your own logging function (default: puts(msg))
-    SOKOL_MALLOC(s)     - your own malloc() implementation (default: malloc(s))
-    SOKOL_FREE(p)       - your own free() implementation (default: free(p))
-    SOKOL_AUDIO_API_DECL- public function declaration prefix (default: extern)
-    SOKOL_API_DECL      - same as SOKOL_AUDIO_API_DECL
-    SOKOL_API_IMPL      - public function implementation prefix (default: -)
-
-    SAUDIO_RING_MAX_SLOTS   - max number of slots in the push-audio ring buffer (default 1024)
-
-    If sokol_audio.h is compiled as a DLL, define the following before
-    including the declaration or implementation:
-
-    SOKOL_DLL
-
-    On Windows, SOKOL_DLL will define SOKOL_AUDIO_API_DECL as __declspec(dllexport)
-    or __declspec(dllimport) as needed.
-
-    FEATURE OVERVIEW
-    ================
-    You provide a mono- or stereo-stream of 32-bit float samples, which
-    Sokol Audio feeds into platform-specific audio backends:
-
-    - Windows: WASAPI
-    - Linux: ALSA (link with asound)
-    - macOS/iOS: CoreAudio (link with AudioToolbox)
-    - emscripten: WebAudio with ScriptProcessorNode
-    - Android: OpenSLES (link with OpenSLES)
-
-    Sokol Audio will not do any buffer mixing or volume control, if you have
-    multiple independent input streams of sample data you need to perform the
-    mixing yourself before forwarding the data to Sokol Audio.
-
-    There are two mutually exclusive ways to provide the sample data:
-
-    1. Callback model: You provide a callback function, which will be called
-       when Sokol Audio needs new samples. On all platforms except emscripten,
-       this function is called from a separate thread.
-    2. Push model: Your code pushes small blocks of sample data from your
-       main loop or a thread you created. The pushed data is stored in
-       a ring buffer where it is pulled by the backend code when
-       needed.
-
-    The callback model is preferred because it is the most direct way to
-    feed sample data into the audio backends and also has less moving parts
-    (there is no ring buffer between your code and the audio backend).
-
-    Sometimes it is not possible to generate the audio stream directly in a
-    callback function running in a separate thread, for such cases Sokol Audio
-    provides the push-model as a convenience.
-
-    SOKOL AUDIO, SOLOUD AND MINIAUDIO
-    =================================
-    The WASAPI, ALSA, OpenSLES and CoreAudio backend code has been taken from the
-    SoLoud library (with some modifications, so any bugs in there are most
-    likely my fault). If you need a more fully-featured audio solution, check
-    out SoLoud, it's excellent:
-
-        https://github.com/jarikomppa/soloud
-
-    Another alternative which feature-wise is somewhere inbetween SoLoud and
-    sokol-audio might be MiniAudio:
-
-        https://github.com/mackron/miniaudio
-
-    GLOSSARY
-    ========
-    - stream buffer:
-        The internal audio data buffer, usually provided by the backend API. The
-        size of the stream buffer defines the base latency, smaller buffers have
-        lower latency but may cause audio glitches. Bigger buffers reduce or
-        eliminate glitches, but have a higher base latency.
-
-    - stream callback:
-        Optional callback function which is called by Sokol Audio when it
-        needs new samples. On Windows, macOS/iOS and Linux, this is called in
-        a separate thread, on WebAudio, this is called per-frame in the
-        browser thread.
-
-    - channel:
-        A discrete track of audio data, currently 1-channel (mono) and
-        2-channel (stereo) is supported and tested.
-
-    - sample:
-        The magnitude of an audio signal on one channel at a given time. In
-        Sokol Audio, samples are 32-bit float numbers in the range -1.0 to
-        +1.0.
-
-    - frame:
-        The tightly packed set of samples for all channels at a given time.
-        For mono 1 frame is 1 sample. For stereo, 1 frame is 2 samples.
-
-    - packet:
-        In Sokol Audio, a small chunk of audio data that is moved from the
-        main thread to the audio streaming thread in order to decouple the
-        rate at which the main thread provides new audio data, and the
-        streaming thread consuming audio data.
-
-    WORKING WITH SOKOL AUDIO
-    ========================
-    First call saudio_setup() with your preferred audio playback options.
-    In most cases you can stick with the default values, these provide
-    a good balance between low-latency and glitch-free playback
-    on all audio backends.
-
-    If you want to use the callback-model, you need to provide a stream
-    callback function either in saudio_desc.stream_cb or saudio_desc.stream_userdata_cb,
-    otherwise keep both function pointers zero-initialized.
-
-    Use push model and default playback parameters:
-
-        saudio_setup(&(saudio_desc){0});
-
-    Use stream callback model and default playback parameters:
-
-        saudio_setup(&(saudio_desc){
-            .stream_cb = my_stream_callback
-        });
-
-    The standard stream callback doesn't have a user data argument, if you want
-    that, use the alternative stream_userdata_cb and also set the user_data pointer:
-
-        saudio_setup(&(saudio_desc){
-            .stream_userdata_cb = my_stream_callback,
-            .user_data = &my_data
-        });
-
-    The following playback parameters can be provided through the
-    saudio_desc struct:
-
-    General parameters (both for stream-callback and push-model):
-
-        int sample_rate     -- the sample rate in Hz, default: 44100
-        int num_channels    -- number of channels, default: 1 (mono)
-        int buffer_frames   -- number of frames in streaming buffer, default: 2048
-
-    The stream callback prototype (either with or without userdata):
-
-        void (*stream_cb)(float* buffer, int num_frames, int num_channels)
-        void (*stream_userdata_cb)(float* buffer, int num_frames, int num_channels, void* user_data)
-            Function pointer to the user-provide stream callback.
-
-    Push-model parameters:
-
-        int packet_frames   -- number of frames in a packet, default: 128
-        int num_packets     -- number of packets in ring buffer, default: 64
-
-    The sample_rate and num_channels parameters are only hints for the audio
-    backend, it isn't guaranteed that those are the values used for actual
-    playback.
-
-    To get the actual parameters, call the following functions after
-    saudio_setup():
-
-        int saudio_sample_rate(void)
-        int saudio_channels(void);
-
-    It's unlikely that the number of channels will be different than requested,
-    but a different sample rate isn't uncommon.
-
-    (NOTE: there's an yet unsolved issue when an audio backend might switch
-    to a different sample rate when switching output devices, for instance
-    plugging in a bluetooth headset, this case is currently not handled in
-    Sokol Audio).
-
-    You can check if audio initialization was successful with
-    saudio_isvalid(). If backend initialization failed for some reason
-    (for instance when there's no audio device in the machine), this
-    will return false. Not checking for success won't do any harm, all
-    Sokol Audio function will silently fail when called after initialization
-    has failed, so apart from missing audio output, nothing bad will happen.
-
-    Before your application exits, you should call
-
-        saudio_shutdown();
-
-    This stops the audio thread (on Linux, Windows and macOS/iOS) and
-    properly shuts down the audio backend.
-
-    THE STREAM CALLBACK MODEL
-    =========================
-    To use Sokol Audio in stream-callback-mode, provide a callback function
-    like this in the saudio_desc struct when calling saudio_setup():
-
-    void stream_cb(float* buffer, int num_frames, int num_channels) {
-        ...
-    }
-
-    Or the alternative version with a user-data argument:
-
-    void stream_userdata_cb(float* buffer, int num_frames, int num_channels, void* user_data) {
-        my_data_t* my_data = (my_data_t*) user_data;
-        ...
-    }
-
-    The job of the callback function is to fill the *buffer* with 32-bit
-    float sample values.
-
-    To output silence, fill the buffer with zeros:
-
-        void stream_cb(float* buffer, int num_frames, int num_channels) {
-            const int num_samples = num_frames * num_channels;
-            for (int i = 0; i < num_samples; i++) {
-                buffer[i] = 0.0f;
-            }
-        }
-
-    For stereo output (num_channels == 2), the samples for the left
-    and right channel are interleaved:
-
-        void stream_cb(float* buffer, int num_frames, int num_channels) {
-            assert(2 == num_channels);
-            for (int i = 0; i < num_frames; i++) {
-                buffer[2*i + 0] = ...;  // left channel
-                buffer[2*i + 1] = ...;  // right channel
-            }
-        }
-
-    Please keep in mind that the stream callback function is running in a
-    separate thread, if you need to share data with the main thread you need
-    to take care yourself to make the access to the shared data thread-safe!
-
-    THE PUSH MODEL
-    ==============
-    To use the push-model for providing audio data, simply don't set (keep
-    zero-initialized) the stream_cb field in the saudio_desc struct when
-    calling saudio_setup().
-
-    To provide sample data with the push model, call the saudio_push()
-    function at regular intervals (for instance once per frame). You can
-    call the saudio_expect() function to ask Sokol Audio how much room is
-    in the ring buffer, but if you provide a continuous stream of data
-    at the right sample rate, saudio_expect() isn't required (it's a simple
-    way to sync/throttle your sample generation code with the playback
-    rate though).
-
-    With saudio_push() you may need to maintain your own intermediate sample
-    buffer, since pushing individual sample values isn't very efficient.
-    The following example is from the MOD player sample in
-    sokol-samples (https://github.com/floooh/sokol-samples):
-
-        const int num_frames = saudio_expect();
-        if (num_frames > 0) {
-            const int num_samples = num_frames * saudio_channels();
-            read_samples(flt_buf, num_samples);
-            saudio_push(flt_buf, num_frames);
-        }
-
-    Another option is to ignore saudio_expect(), and just push samples as they
-    are generated in small batches. In this case you *need* to generate the
-    samples at the right sample rate:
-
-    The following example is taken from the Tiny Emulators project
-    (https://github.com/floooh/chips-test), this is for mono playback,
-    so (num_samples == num_frames):
-
-        // tick the sound generator
-        if (ay38910_tick(&sys->psg)) {
-            // new sample is ready
-            sys->sample_buffer[sys->sample_pos++] = sys->psg.sample;
-            if (sys->sample_pos == sys->num_samples) {
-                // new sample packet is ready
-                saudio_push(sys->sample_buffer, sys->num_samples);
-                sys->sample_pos = 0;
-            }
-        }
-
-    THE WEBAUDIO BACKEND
-    ====================
-    The WebAudio backend is currently using a ScriptProcessorNode callback to
-    feed the sample data into WebAudio. ScriptProcessorNode has been
-    deprecated for a while because it is running from the main thread, with
-    the default initialization parameters it works 'pretty well' though.
-    Ultimately Sokol Audio will use Audio Worklets, but this requires a few
-    more things to fall into place (Audio Worklets implemented everywhere,
-    SharedArrayBuffers enabled again, and I need to figure out a 'low-cost'
-    solution in terms of implementation effort, since Audio Worklets are
-    a lot more complex than ScriptProcessorNode if the audio data needs to come
-    from the main thread).
-
-    The WebAudio backend is automatically selected when compiling for
-    emscripten (__EMSCRIPTEN__ define exists).
-
-    https://developers.google.com/web/updates/2017/12/audio-worklet
-    https://developers.google.com/web/updates/2018/06/audio-worklet-design-pattern
-
-    "Blob URLs": https://www.html5rocks.com/en/tutorials/workers/basics/
-
-    THE COREAUDIO BACKEND
-    =====================
-    The CoreAudio backend is selected on macOS and iOS (__APPLE__ is defined).
-    Since the CoreAudio API is implemented in C (not Objective-C) the
-    implementation part of Sokol Audio can be included into a C source file.
-
-    For thread synchronisation, the CoreAudio backend will use the
-    pthread_mutex_* functions.
-
-    The incoming floating point samples will be directly forwarded to
-    CoreAudio without further conversion.
-
-    macOS and iOS applications that use Sokol Audio need to link with
-    the AudioToolbox framework.
-
-    THE WASAPI BACKEND
-    ==================
-    The WASAPI backend is automatically selected when compiling on Windows
-    (_WIN32 is defined).
-
-    For thread synchronisation a Win32 critical section is used.
-
-    WASAPI may use a different size for its own streaming buffer then requested,
-    so the base latency may be slightly bigger. The current backend implementation
-    converts the incoming floating point sample values to signed 16-bit
-    integers.
-
-    The required Windows system DLLs are linked with #pragma comment(lib, ...),
-    so you shouldn't need to add additional linker libs in the build process
-    (otherwise this is a bug which should be fixed in sokol_audio.h).
-
-    THE ALSA BACKEND
-    ================
-    The ALSA backend is automatically selected when compiling on Linux
-    ('linux' is defined).
-
-    For thread synchronisation, the pthread_mutex_* functions are used.
-
-    Samples are directly forwarded to ALSA in 32-bit float format, no
-    further conversion is taking place.
-
-    You need to link with the 'asound' library, and the <alsa/asoundlib.h>
-    header must be present (usually both are installed with some sort
-    of ALSA development package).
-
     LICENSE
     =======
 
@@ -411,22 +75,6 @@ typedef struct saudio_desc {
 SOKOL_AUDIO_API_DECL void saudio_setup(const saudio_desc* desc);
 /* shutdown sokol-audio */
 SOKOL_AUDIO_API_DECL void saudio_shutdown(void);
-/* true after setup if audio backend was successfully initialized */
-SOKOL_AUDIO_API_DECL bool saudio_isvalid(void);
-/* return the saudio_desc.user_data pointer */
-SOKOL_AUDIO_API_DECL void* saudio_userdata(void);
-/* return a copy of the original saudio_desc struct */
-SOKOL_AUDIO_API_DECL saudio_desc saudio_query_desc(void);
-/* actual sample rate */
-SOKOL_AUDIO_API_DECL int saudio_sample_rate(void);
-/* return actual backend buffer size in number of frames */
-SOKOL_AUDIO_API_DECL int saudio_buffer_frames(void);
-/* actual number of channels */
-SOKOL_AUDIO_API_DECL int saudio_channels(void);
-/* get current number of frames to fill packet queue */
-SOKOL_AUDIO_API_DECL int saudio_expect(void);
-/* push sample frames from main thread, returns number of frames actually pushed */
-SOKOL_AUDIO_API_DECL int saudio_push(const float* frames, int num_frames);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -553,29 +201,10 @@ inline void saudio_setup(const saudio_desc& desc) { return saudio_setup(&desc); 
 #define SAUDIO_RING_MAX_SLOTS (1024)
 #endif
 
-/*=== MUTEX WRAPPER DECLARATIONS =============================================*/
-#if defined(SOKOL_DUMMY_BACKEND)
-
-typedef struct { int dummy_mutex; } _saudio_mutex_t;
-
-#elif defined(_WIN32)
-
 typedef struct {
     CRITICAL_SECTION critsec;
 } _saudio_mutex_t;
 
-#else
-typedef struct { int dummy_mutex; } _saudio_mutex_t;
-#endif
-
-/*=== DUMMY BACKEND DECLARATIONS =============================================*/
-#if defined(SOKOL_DUMMY_BACKEND)
-typedef struct {
-    int dummy_backend;
-} _saudio_backend_t;
-
-/*=== WASAPI BACKEND DECLARATIONS ============================================*/
-#elif defined(_WIN32)
 
 typedef struct {
     HANDLE thread_handle;
@@ -589,12 +218,7 @@ typedef struct {
 } _saudio_wasapi_thread_data_t;
 
 typedef struct {
-#if defined(SOKOL_WIN32_NO_MMDEVICE)
-    LPOLESTR interface_activation_audio_interface_uid_string;
-    IActivateAudioInterfaceAsyncOperation* interface_activation_operation;
-    BOOL interface_activation_success;
-    HANDLE interface_activation_mutex;
-#else
+
     IMMDeviceEnumerator* device_enumerator;
     IMMDevice* device;
 #endif
@@ -604,39 +228,7 @@ typedef struct {
     _saudio_wasapi_thread_data_t thread;
 } _saudio_backend_t;
 
-/*=== WEBAUDIO BACKEND DECLARATIONS ==========================================*/
-#elif defined(__EMSCRIPTEN__)
-
-typedef struct {
-    uint8_t* buffer;
-} _saudio_backend_t;
-
-/*=== DUMMY BACKEND DECLARATIONS =============================================*/
-#else
-typedef struct { } _saudio_backend_t;
-#endif
 /*=== GENERAL DECLARATIONS ===================================================*/
-
-/* a ringbuffer structure */
-typedef struct {
-    uint32_t head;  /* next slot to write to */
-    uint32_t tail;  /* next slot to read from */
-    uint32_t num;   /* number of slots in queue */
-    uint32_t queue[SAUDIO_RING_MAX_SLOTS];
-} _saudio_ring_t;
-
-/* a packet FIFO structure */
-typedef struct {
-    bool valid;
-    int packet_size;            /* size of a single packets in bytes(!) */
-    int num_packets;            /* number of packet in fifo */
-    uint8_t* base_ptr;          /* packet memory chunk base pointer (dynamically allocated) */
-    int cur_packet;             /* current write-packet */
-    int cur_offset;             /* current byte-offset into current write packet */
-    _saudio_mutex_t mutex;      /* mutex for thread-safe access */
-    _saudio_ring_t read_queue;  /* buffers with data, ready to be streamed */
-    _saudio_ring_t write_queue; /* empty buffers, ready to be pushed to */
-} _saudio_fifo_t;
 
 /* sokol-audio state */
 typedef struct {
@@ -651,7 +243,6 @@ typedef struct {
     int num_packets;            /* number of packets in packet queue */
     int num_channels;           /* actual number of channels */
     saudio_desc desc;
-    _saudio_fifo_t fifo;
     _saudio_backend_t backend;
 } _saudio_state_t;
 
@@ -671,31 +262,6 @@ _SOKOL_PRIVATE DWORD _saudio_stream_callback(float* buffer, int num_frames, int 
 }
 
 /*=== MUTEX IMPLEMENTATION ===================================================*/
-#if defined(SOKOL_DUMMY_BACKEND)
-_SOKOL_PRIVATE void _saudio_mutex_init(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_destroy(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_lock(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_unlock(_saudio_mutex_t* m) { (void)m; }
-#elif (defined(__APPLE__) || defined(__linux__) || defined(__unix__)) && !defined(__EMSCRIPTEN__)
-_SOKOL_PRIVATE void _saudio_mutex_init(_saudio_mutex_t* m) {
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutex_init(&m->mutex, &attr);
-}
-
-_SOKOL_PRIVATE void _saudio_mutex_destroy(_saudio_mutex_t* m) {
-    pthread_mutex_destroy(&m->mutex);
-}
-
-_SOKOL_PRIVATE void _saudio_mutex_lock(_saudio_mutex_t* m) {
-    pthread_mutex_lock(&m->mutex);
-}
-
-_SOKOL_PRIVATE void _saudio_mutex_unlock(_saudio_mutex_t* m) {
-    pthread_mutex_unlock(&m->mutex);
-}
-
-#elif defined(_WIN32)
 _SOKOL_PRIVATE void _saudio_mutex_init(_saudio_mutex_t* m) {
     InitializeCriticalSection(&m->critsec);
 }
@@ -711,54 +277,6 @@ _SOKOL_PRIVATE void _saudio_mutex_lock(_saudio_mutex_t* m) {
 _SOKOL_PRIVATE void _saudio_mutex_unlock(_saudio_mutex_t* m) {
     LeaveCriticalSection(&m->critsec);
 }
-#else
-_SOKOL_PRIVATE void _saudio_mutex_init(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_destroy(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_lock(_saudio_mutex_t* m) { (void)m; }
-_SOKOL_PRIVATE void _saudio_mutex_unlock(_saudio_mutex_t* m) { (void)m; }
-#endif
-
-#if defined(SOKOL_WIN32_NO_MMDEVICE)
-/* Minimal implementation of an IActivateAudioInterfaceCompletionHandler COM object in plain C.
-   Meant to be a static singleton (always one reference when add/remove reference)
-   and implements IUnknown and IActivateAudioInterfaceCompletionHandler when queryinterface'd
-
-   Do not know why but IActivateAudioInterfaceCompletionHandler's GUID is not the one system queries for,
-   so I'm advertising the one actually requested.
-*/
-_SOKOL_PRIVATE HRESULT STDMETHODCALLTYPE _saudio_interface_completion_handler_queryinterface(IActivateAudioInterfaceCompletionHandler* instance, REFIID riid, void** ppvObject) {
-    if (!ppvObject) {
-        return E_POINTER;
-    }
-
-    if (IsEqualIID(riid, _SOKOL_AUDIO_WIN32COM_ID(_saudio_IID_IActivateAudioInterface_Completion_Handler)) || IsEqualIID(riid, _SOKOL_AUDIO_WIN32COM_ID(IID_IUnknown)))
-    {
-        *ppvObject = (void*)instance;
-        return S_OK;
-    }
-
-    *ppvObject = NULL;
-    return E_NOINTERFACE;
-}
-
-_SOKOL_PRIVATE ULONG STDMETHODCALLTYPE _saudio_interface_completion_handler_addref_release(IActivateAudioInterfaceCompletionHandler* instance) {
-    _SOKOL_UNUSED(instance);
-    return 1;
-}
-
-_SOKOL_PRIVATE HRESULT STDMETHODCALLTYPE _saudio_backend_activate_audio_interface_cb(IActivateAudioInterfaceCompletionHandler* instance, IActivateAudioInterfaceAsyncOperation* activateOperation) {
-    _SOKOL_UNUSED(instance);
-    WaitForSingleObject(_saudio.backend.interface_activation_mutex, INFINITE);
-    _saudio.backend.interface_activation_success = TRUE;
-    HRESULT activation_result;
-    if (FAILED(activateOperation->lpVtbl->GetActivateResult(activateOperation, &activation_result, (IUnknown**)(&_saudio.backend.audio_client))) || FAILED(activation_result)) {
-        _saudio.backend.interface_activation_success = FALSE;
-    }
-
-    ReleaseMutex(_saudio.backend.interface_activation_mutex);
-    return S_OK;
-}
-#endif
 
 _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
     BYTE* wasapi_buffer = 0;
@@ -807,16 +325,7 @@ _SOKOL_PRIVATE void _saudio_wasapi_release(void) {
         IAudioClient_Release(_saudio.backend.audio_client);
         _saudio.backend.audio_client = 0;
     }
-#if defined(SOKOL_WIN32_NO_MMDEVICE)
-    if (_saudio.backend.interface_activation_audio_interface_uid_string) {
-        CoTaskMemFree(_saudio.backend.interface_activation_audio_interface_uid_string);
-        _saudio.backend.interface_activation_audio_interface_uid_string = 0;
-    }
-    if (_saudio.backend.interface_activation_operation) {
-        IActivateAudioInterfaceAsyncOperation_Release(_saudio.backend.interface_activation_operation);
-        _saudio.backend.interface_activation_operation = 0;
-    }
-#else
+
     if (_saudio.backend.device) {
         IMMDevice_Release(_saudio.backend.device);
         _saudio.backend.device = 0;
@@ -825,7 +334,7 @@ _SOKOL_PRIVATE void _saudio_wasapi_release(void) {
         IMMDeviceEnumerator_Release(_saudio.backend.device_enumerator);
         _saudio.backend.device_enumerator = 0;
     }
-#endif
+
     if (0 != _saudio.backend.thread.buffer_end_event) {
         CloseHandle(_saudio.backend.thread.buffer_end_event);
         _saudio.backend.thread.buffer_end_event = 0;
@@ -849,42 +358,7 @@ _SOKOL_PRIVATE bool _saudio_backend_init(void) {
         SOKOL_LOG("sokol_audio wasapi: failed to create buffer_end_event");
         goto error;
     }
-#if defined(SOKOL_WIN32_NO_MMDEVICE)
-    _saudio.backend.interface_activation_mutex = CreateMutexA(NULL, FALSE, "interface_activation_mutex");
-    if (_saudio.backend.interface_activation_mutex == NULL) {
-        SOKOL_LOG("sokol_audio wasapi: failed to create interface activation mutex");
-        goto error;
-    }
-    if (FAILED(StringFromIID(_SOKOL_AUDIO_WIN32COM_ID(_saudio_IID_Devinterface_Audio_Render), &_saudio.backend.interface_activation_audio_interface_uid_string))) {
-        SOKOL_LOG("sokol_audio wasapi: failed to get default audio device ID string");
-        goto error;
-    }
 
-    /* static instance of the fake COM object */
-    static IActivateAudioInterfaceCompletionHandlerVtbl completion_handler_interface_vtable = {
-        _saudio_interface_completion_handler_queryinterface,
-        _saudio_interface_completion_handler_addref_release,
-        _saudio_interface_completion_handler_addref_release,
-        _saudio_backend_activate_audio_interface_cb
-    };
-    static IActivateAudioInterfaceCompletionHandler completion_handler_interface = { &completion_handler_interface_vtable };
-
-    if (FAILED(ActivateAudioInterfaceAsync(_saudio.backend.interface_activation_audio_interface_uid_string, _SOKOL_AUDIO_WIN32COM_ID(_saudio_IID_IAudioClient), NULL, &completion_handler_interface, &_saudio.backend.interface_activation_operation))) {
-        SOKOL_LOG("sokol_audio wasapi: failed to get default audio device ID string");
-        goto error;
-    }
-    while (!(_saudio.backend.audio_client)) {
-        if (WaitForSingleObject(_saudio.backend.interface_activation_mutex, 10) != WAIT_TIMEOUT) {
-            ReleaseMutex(_saudio.backend.interface_activation_mutex);
-        }
-    }
-
-    if (!(_saudio.backend.interface_activation_success)) {
-        SOKOL_LOG("sokol_audio wasapi: interface activation failed. Unable to get audio client");
-        goto error;
-    }
-
-#else
     if (FAILED(CoCreateInstance(_SOKOL_AUDIO_WIN32COM_ID(_saudio_CLSID_IMMDeviceEnumerator),
         0, CLSCTX_ALL,
         _SOKOL_AUDIO_WIN32COM_ID(_saudio_IID_IMMDeviceEnumerator),
@@ -908,7 +382,7 @@ _SOKOL_PRIVATE bool _saudio_backend_init(void) {
         SOKOL_LOG("sokol_audio wasapi: device activate failed");
         goto error;
     }
-#endif
+
     WAVEFORMATEX fmt;
     memset(&fmt, 0, sizeof(fmt));
     fmt.nChannels = (WORD) _saudio.num_channels;
@@ -1012,30 +486,6 @@ SOKOL_API_IMPL void saudio_shutdown(void) {
     }
 }
 
-SOKOL_API_IMPL bool saudio_isvalid(void) {
-    return _saudio.valid;
-}
-
-SOKOL_API_IMPL void* saudio_userdata(void) {
-    return _saudio.desc.user_data;
-}
-
-SOKOL_API_IMPL saudio_desc saudio_query_desc(void) {
-    return _saudio.desc;
-}
-
-SOKOL_API_IMPL int saudio_sample_rate(void) {
-    return _saudio.sample_rate;
-}
-
-SOKOL_API_IMPL int saudio_buffer_frames(void) {
-    return _saudio.buffer_frames;
-}
-
-SOKOL_API_IMPL int saudio_channels(void) {
-    return _saudio.num_channels;
-}
-
 #undef _saudio_def
 #undef _saudio_def_flt
 
@@ -1043,4 +493,3 @@ SOKOL_API_IMPL int saudio_channels(void) {
 #pragma warning(pop)
 #endif
 
-#endif /* SOKOL_AUDIO_IMPL */

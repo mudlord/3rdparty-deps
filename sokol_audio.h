@@ -211,10 +211,6 @@ typedef struct {
     HANDLE buffer_end_event;
     bool stop;
     UINT32 dst_buffer_frames;
-    int src_buffer_frames;
-    int src_buffer_byte_size;
-    int src_buffer_pos;
-    float* src_buffer;
 } _saudio_wasapi_thread_data_t;
 
 typedef struct {
@@ -224,7 +220,6 @@ typedef struct {
 #endif
     IAudioClient* audio_client;
     IAudioRenderClient* render_client;
-    int si16_bytes_per_frame;
     _saudio_wasapi_thread_data_t thread;
 } _saudio_backend_t;
 
@@ -295,7 +290,7 @@ _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
 
 _SOKOL_PRIVATE DWORD WINAPI _saudio_wasapi_thread_fn(LPVOID param) {
     (void)param;
-    _saudio_wasapi_submit_buffer(_saudio.backend.thread.src_buffer_frames);
+    _saudio_wasapi_submit_buffer(_saudio.buffer_frames);
     IAudioClient_Start(_saudio.backend.audio_client);
     while (!_saudio.backend.thread.stop) {
         WaitForSingleObject(_saudio.backend.thread.buffer_end_event, INFINITE);
@@ -412,9 +407,6 @@ _SOKOL_PRIVATE bool _saudio_backend_init(void) {
         SOKOL_LOG("sokol_audio wasapi: audio client SetEventHandle failed");
         goto error;
     }
-    _saudio.bytes_per_frame = _saudio.num_channels * sizeof(float);
-    _saudio.backend.thread.src_buffer_frames = _saudio.buffer_frames;
-    _saudio.backend.thread.src_buffer_byte_size = _saudio.backend.thread.src_buffer_frames * _saudio.bytes_per_frame;
 
     /* create streaming thread */
     _saudio.backend.thread.thread_handle = CreateThread(NULL, 0, _saudio_wasapi_thread_fn, 0, 0, 0);
@@ -470,7 +462,6 @@ SOKOL_API_IMPL void saudio_setup(const saudio_desc* desc) {
             _saudio_backend_shutdown();
             return;
         }
-        SOKOL_ASSERT(_saudio.bytes_per_frame > 0);
         _saudio.valid = true;
     }
 }

@@ -217,7 +217,6 @@ typedef struct {
 
     IMMDeviceEnumerator* device_enumerator;
     IMMDevice* device;
-#endif
     IAudioClient* audio_client;
     IAudioRenderClient* render_client;
     _saudio_wasapi_thread_data_t thread;
@@ -480,3 +479,4 @@ SOKOL_API_IMPL void saudio_shutdown(void) {
 #pragma warning(pop)
 #endif
 
+#endif

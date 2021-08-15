@@ -278,12 +278,9 @@ _SOKOL_PRIVATE void _saudio_wasapi_submit_buffer(UINT32 num_frames) {
         return;
     }
     SOKOL_ASSERT(wasapi_buffer);
-    DWORD framecount = _saudio_stream_callback((float*)wasapi_buffer, num_frames, _saudio.num_channels);
-    DWORD samplesRead = framecount * _saudio.num_channels;
-    DWORD sampleSize = sizeof(float);
-    DWORD consumedBytes = samplesRead * sampleSize;
-    DWORD remainingBytes = ((num_frames * _saudio.num_channels) - samplesRead) * sampleSize;
-    memset((BYTE*)wasapi_buffer + consumedBytes, 0, remainingBytes);
+    DWORD consumedBytes = _saudio_stream_callback((float*)wasapi_buffer, num_frames, _saudio.num_channels);
+    DWORD samplesRead = ((num_frames * _saudio.num_channels) * sizeof(float));
+    memset((BYTE*)wasapi_buffer + consumedBytes, 0, samplesRead-consumedBytes);
     IAudioRenderClient_ReleaseBuffer(_saudio.backend.render_client, num_frames, 0);
 }
 
